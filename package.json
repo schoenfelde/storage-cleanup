@@ -1,0 +1,28 @@
+{
+  "name": "storage-cleanup",
+  "version": "1.0.0",
+  "private": true,
+  "description": "macOS storage scan CLI (Ink UI) to find large folders/files and dev/media caches.",
+  "bin": {
+    "storage-scan": "dist/index.js"
+  },
+  "scripts": {
+    "start": "tsx src/index.tsx",
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.tsx"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ink": "^4.4.1",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "^4.16.2",
+    "typescript": "^5.4.5"
+  }
+}
+
