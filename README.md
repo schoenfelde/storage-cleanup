@@ -1,85 +1,174 @@
-Storage Cleanup CLI (macOS)
+# 🧹 storage-cleanup
 
-Overview
-- A macOS‑friendly CLI (TypeScript + Ink) to surface large folders, files, and common heavy caches so you can manually review and reclaim space.
-- Interactive Navigator: arrow‑key UI that lets you browse folders, scan on demand, and cache results within a session.
+macOS disk usage navigator and scanners (TypeScript + Ink). Quickly surface the largest folders, files, and common heavy caches so you can review and reclaim space. Read‑only by default — no deletions.
 
-What It Finds
-- Largest subfolders at depth 1 under a path.
-- Largest files with a minimum size filter.
-- Largest node_modules folders (great for old projects).
-- Common heavy locations: Xcode/Simulators, Android/Gradle, npm/Yarn/pnpm caches, Homebrew, Docker, Adobe, DaVinci, Downloads, Movies, Library caches.
+• Node 18+ • macOS (BSD utils) • Read‑only
 
-Getting Started (pnpm)
+
+## Why
+
+Finding where your disk space went is tedious. This CLI shells out to fast, accurate macOS tools (`du`, `find`) and presents results in either:
+
+- An interactive navigator (default) to browse and rescan folders with cached results, or
+- Focused one‑shot commands for directories, files, `node_modules`, and a curated preset of heavy locations.
+
+
+## Features
+
+- Interactive navigator with live progress and session/disk caching
+- Largest subfolders (depth 1) under any path
+- Largest files with size threshold
+- Largest `node_modules` directories
+- High‑signal preset: Downloads, Movies, Library, Xcode/iOS, Android/Gradle, JS caches, Homebrew, Docker, Adobe, DaVinci
+- Transparent sizes: absolute paths + human‑readable output
+- macOS‑first: BSD‑compatible flags; stays on same filesystem via `du -x`
+- Read‑only reporting — never deletes data
+
+
+## Quick Start
+
 Requirements
-- Node.js 18+ on macOS.
-- System utilities available in PATH: `find`, `du`.
 
-1) Install deps
-   - pnpm install
+- Node.js 18+ on macOS
+- `du` and `find` available in your `PATH` (default on macOS)
 
-2) Run (dev)
-   - pnpm start -- preset --top 20
-   - pnpm start -- dirs --path "$HOME" --top 30
-   - pnpm start -- files --path "$HOME" --min-size-mb 500 --top 50
-   - pnpm start -- nodes --path "$HOME/code" --top 50
-   - pnpm start           # Interactive Navigator (default)
+Install
 
-3) Build a binary script and run
-   - pnpm run build
-   - node dist/index.js preset --top 20
-   - node dist/index.js dirs --path "$HOME/Library" --top 40
+```bash
+pnpm install
+```
 
-4) Optional: expose as a global (local project)
-   - pnpm link --global
-   - storage-scan preset --top 20
+Run (interactive navigator)
 
-CLI Commands
-- dirs
-  - List largest immediate subfolders for a path.
-  - Options: --path PATH (default: $HOME), --top N, --exclude GLOB (repeatable), --debug
+```bash
+pnpm start
+```
 
-- files
-  - List largest files under a path with size threshold.
-  - Options: --path PATH, --top N, --min-size-mb M (default: 100), --exclude GLOB (repeatable)
+Run (legacy subcommands)
 
-- nodes
-  - Find largest node_modules directories under a path.
-  - Options: --path PATH, --top N, --exclude GLOB (repeatable)
+```bash
+# Quick preset overview (recommended first pass)
+pnpm start -- preset --top 20
 
-- preset
-  - Quick scan of common heavy locations and top node_modules, plus depth‑1 scans of Downloads, Movies, and Library.
-  - Options: --top N (applies to lists within the preset where relevant)
+# Largest subfolders (depth 1)
+pnpm start -- dirs --path "$HOME" --top 30
 
-- nav (interactive default)
-  - Arrow‑key navigator with session caching
-  - Behavior:
-    - Auto‑scans the start directory ($HOME) on launch (top 30)
-    - Up/Down: select a subfolder
-    - Right, Enter, or Space: enter folder (auto‑refresh)
-    - Left or b: go to parent (auto‑refresh)
-    - r: rescan current folder
-    - o: open selected item in Finder (or current folder if none)
-    - q / Esc: quit
-  - Shows Folders (top 30) by size; current folder’s total size shown under header
-  - While scanning, shows a compact, colorized progress bar and spinner; cached results remain visible and update when complete
-  - Caches scans during the session and persists to disk between runs (.storage-cleanup-cache/cache.json in the project directory)
+# Largest files under a path
+pnpm start -- files --path "$HOME" --min-size-mb 500 --top 50
+
+# Largest node_modules under a path
+pnpm start -- nodes --path "$HOME/code" --top 50
+```
+
+Build and run the compiled CLI
+
+```bash
+pnpm run build
+node dist/index.js preset --top 20
+node dist/index.js dirs --path "$HOME/Library" --top 40
+```
+
+Optional: use as a global (local project)
+
+```bash
+pnpm link --global
+storage-scan preset --top 20
+```
+
+
+## Interactive Navigator
+
+Launch with `pnpm start` (or by running without a subcommand). It auto‑scans `$HOME` on launch and shows the top 30 subfolders by size. Cached results render immediately; while scanning, you’ll see a compact colorized progress bar with counts and elapsed time.
+
+Keybindings
+
+| Key                    | Action                              |
+| ---------------------- | ----------------------------------- |
+| Up/Down                | Select subfolder                     |
+| Right / Enter / Space  | Enter folder + auto‑refresh          |
+| Left / b               | Go to parent + auto‑refresh          |
+| r                      | Rescan current folder                |
+| o                      | Open selected/current in Finder      |
+| g / G                  | Jump to top / bottom                 |
+| q / Esc                | Quit                                 |
 
 Notes
-- The tool only reports sizes; it never deletes anything.
-- Excludes are substring matches. To see everything, don’t pass --exclude.
-- For broad scans, start with files --min-size-mb 500 to quickly surface biggest wins, then lower as needed.
- - Implementation uses macOS `find` and `du` for speed and accurate sizes.
- - Interactive mode requires a TTY. If you see a "Raw mode is not supported" error, run in a regular terminal (not via a non‑interactive runner).
- - If `dirs` prints no results, try adding `--debug`. The CLI will fall back to using `find` to list immediate directories and will log a short debug note if the initial readdir fails or returns empty.
 
-Areas Commonly Worth Reviewing
-- Xcode: DerivedData, Archives, iOS Simulator devices.
-- Android/Gradle caches.
-- JS package caches: npm, Yarn, pnpm.
-- Media app caches: Adobe Media Cache, DaVinci CacheClip/ProxyMedia.
-- Docker Desktop VM disk (Docker.raw).
-- ~/Downloads and ~/Movies subfolders.
+- Current directory total size is shown under the header.
+- Results persist between runs under `.storage-cleanup-cache/cache.json` in the project directory.
+- Interactive mode requires a TTY. If you see “Raw mode is not supported”, run in a normal terminal.
 
-Safety Tip
-- Always review before deleting. For dev projects, removing node_modules in inactive projects is generally safe; active projects may need them kept or reinstalled.
+
+## Legacy Subcommands
+
+`dirs`
+
+- Largest immediate subfolders under a path (depth 1).
+- Options: `--path PATH` (default: `$HOME`), `--top N`, `--exclude GLOB` (repeatable), `--debug`
+
+`files`
+
+- Largest files under a path with size threshold.
+- Options: `--path PATH`, `--top N`, `--min-size-mb M` (default: `100`), `--exclude GLOB` (repeatable)
+
+`nodes`
+
+- Largest `node_modules` directories under a path.
+- Options: `--path PATH`, `--top N`, `--exclude GLOB` (repeatable)
+
+`preset`
+
+- High‑signal overview: known heavy locations (Downloads, Movies, Library, Xcode/Simulators, Android/Gradle, JS caches, Homebrew, Docker, Adobe, DaVinci) and top `node_modules`.
+- Option: `--top N` applied to relevant lists within the preset.
+
+
+## Safety & Compatibility
+
+- Read‑only: this tool only reports sizes and paths; it never deletes or modifies files.
+- macOS‑first: uses BSD‑compatible flags, e.g. `find -size +100M`, `du -skx`.
+- Same filesystem: `du -x` avoids crossing into mounted volumes.
+- Exclusions: substring matches; to see everything, omit `--exclude`.
+
+
+## Caching & Performance
+
+- Directory sizes use `du -skx` for speed and accuracy on macOS.
+- Large file sizes read via Node `stat` when scanning `files`.
+- Progress callbacks are throttled and guarded to avoid flicker or stale updates.
+- Cache persists between sessions at `.storage-cleanup-cache/cache.json` within the project directory.
+
+
+## Examples
+
+```bash
+# Triage downloads
+pnpm start -- dirs --path "$HOME/Downloads" --top 30
+
+# Find the biggest single files quickly
+pnpm start -- files --path "$HOME" --min-size-mb 1000 --top 25
+
+# Hunt down monster node_modules
+pnpm start -- nodes --path "$HOME/code" --top 100
+```
+
+
+## Troubleshooting
+
+- No results from `dirs`? Try `--debug`. The CLI will fall back to `find` if a direct readdir returned empty.
+- Interactive mode errors about “raw mode”: run in a regular terminal (not a non‑interactive runner).
+- Slow scan of an enormous directory? Narrow the scope first (use `preset`, then drill down).
+
+
+## Roadmap (non‑destructive)
+
+- Optional output formats: `--json`, `--csv`
+- Config file for defaults: start paths, excludes, top counts
+- Optional depth for `dirs` (with clear warnings for depth > 1)
+- Per‑domain helpers (e.g., summarize Xcode simulators by runtime)
+- UI niceties: focus toggle for a Files pane; live controls for file‑size thresholds
+
+
+## Notes
+
+- Common areas worth reviewing: Xcode DerivedData/Archives/Simulators, Android/Gradle caches, npm/Yarn/pnpm caches, Adobe Media Cache, DaVinci CacheClip/ProxyMedia, Docker Desktop VM disk (`Docker.raw`), `~/Downloads`, `~/Movies`.
+- Always review before deleting. For dev projects, removing `node_modules` in inactive projects is generally safe; active projects may need them kept or reinstalled.
