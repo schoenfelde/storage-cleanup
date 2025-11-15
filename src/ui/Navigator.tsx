@@ -96,6 +96,14 @@ function Rows({items, selectedIndex}: {items: Array<{label: string; right?: stri
   );
 }
 
+function getNavigableList(entry?: DirCacheEntry): Array<SizeEntry | string> {
+  if (!entry) return [];
+  if (entry.dirs && entry.dirs.length > 0) {
+    return entry.dirs;
+  }
+  return entry.alphaDirs || [];
+}
+
 export default function Navigator() {
   const startPath = useMemo(() => process.env.HOME || process.cwd(), []);
   const [currentPath, setCurrentPath] = useState<string>(startPath);
@@ -104,8 +112,12 @@ export default function Navigator() {
   const [progressDirs, setProgressDirs] = useState<Progress | null>(null);
   const [elapsedStart, setElapsedStart] = useState<number>(Date.now());
   const [currentSizeKb, setCurrentSizeKb] = useState<number | null>(null);
+  const [deletePrompt, setDeletePrompt] = useState<{path: string; label: string; status: 'confirm' | 'working'; error?: string} | null>(null);
   const {stdout} = useStdout();
   const termRows = stdout?.rows ?? 24;
+  const entry = cache.get(currentPath);
+  const navigableList = getNavigableList(entry);
+  const navigableLen = navigableList.length;
 
   // Initialize entry, list alpha subdirs
   useEffect(() => {
@@ -238,11 +250,63 @@ export default function Navigator() {
     return currentOffset;
   }
 
+  async function confirmDelete(targetPath: string) {
+    setDeletePrompt((prev) => prev ? {...prev, status: 'working', error: undefined} : prev);
+    try {
+      await fs.promises.rm(targetPath, {recursive: true, force: true});
+      setDeletePrompt(null);
+      setCache((prev) => {
+        const next = new Map(prev);
+        next.delete(targetPath);
+        const parent = path.dirname(targetPath);
+        const parentEntry = next.get(parent);
+        if (parentEntry) {
+          parentEntry.alphaDirs = parentEntry.alphaDirs.filter((d) => d !== targetPath);
+          if (parentEntry.dirs) parentEntry.dirs = parentEntry.dirs.filter((d) => d.path !== targetPath);
+        }
+        return next;
+      });
+      if (currentPath === targetPath) {
+        // If the deleted target is the current directory, go up a level
+        const parent = path.dirname(targetPath);
+        if (parent && parent !== targetPath) {
+          setCurrentPath(parent);
+          setSelectedIndex(0);
+          setViewOffset(0);
+        }
+      }
+      setElapsedStart(Date.now());
+      void triggerScan(currentPath === targetPath ? path.dirname(targetPath) : currentPath, true);
+    } catch (err: any) {
+      setDeletePrompt((prev) => prev ? {...prev, status: 'confirm', error: err?.message || String(err)} : prev);
+    }
+  }
+
+  useEffect(() => {
+    setSelectedIndex((idx) => {
+      if (navigableLen === 0) return 0;
+      return Math.max(0, Math.min(idx, navigableLen - 1));
+    });
+  }, [navigableLen]);
+
   // Navigation input
   useInput((input, key) => {
-    const entry = cache.get(currentPath);
-    const list = entry?.status === 'scanned' ? (entry.dirs || []) : (entry?.alphaDirs || []);
-    const len = list.length;
+    if (deletePrompt) {
+      if (key.escape || input === 'n') {
+        setDeletePrompt(null);
+        return;
+      }
+      if ((input && input.toLowerCase() === 'y') || key.return) {
+        if (deletePrompt.status !== 'working') {
+          void confirmDelete(deletePrompt.path);
+        }
+      }
+      return;
+    }
+
+    const list = navigableList;
+    const len = navigableLen;
+    const normalizedIndex = len ? Math.min(selectedIndex, len - 1) : 0;
 
     if (key.escape || input === 'q') {
       process.exit(0);
@@ -273,7 +337,7 @@ export default function Navigator() {
         // try to highlight the child we came from
         setTimeout(() => {
           const pe = cache.get(parent);
-          const arr = pe?.status === 'scanned' ? (pe?.dirs || []) : (pe?.alphaDirs || []);
+          const arr = getNavigableList(pe);
           if (arr && arr.length) {
             const idx = arr.findIndex((v:any) => (typeof v === 'string' ? v : v.path) === cameFrom);
             if (idx >= 0) setSelectedIndex(idx);
@@ -283,7 +347,7 @@ export default function Navigator() {
     } else if (key.rightArrow || key.return || input === ' ') {
       // Enter selected directory
       if (!len) return;
-      const sel = list[selectedIndex];
+      const sel = list[normalizedIndex];
       const nextPath = typeof sel === 'string' ? sel : (sel as SizeEntry).path;
       setCurrentPath(nextPath);
       setSelectedIndex(0);
@@ -302,13 +366,19 @@ export default function Navigator() {
     } else if (input === 'r') {
       // Rescan
       void triggerScan(currentPath, true);
+    } else if (input === 'd') {
+      if (!len || !list[normalizedIndex]) return;
+      const sel = list[normalizedIndex];
+      const targetPath = typeof sel === 'string' ? sel : (sel as SizeEntry).path;
+      const label = basenameNoSlash(targetPath);
+      setDeletePrompt({path: targetPath, label, status: 'confirm'});
     } else if (input === 'o') {
       // Open in Finder
       try {
         // Open selected item if available; fall back to currentPath
         let openPath = currentPath;
         if (len) {
-          const sel = list[selectedIndex];
+          const sel = list[normalizedIndex];
           openPath = typeof sel === 'string' ? sel : (sel as SizeEntry).path;
           // If it somehow points to a file, open its parent
           try { const st = fs.statSync(openPath); if (st.isFile()) openPath = path.dirname(openPath); } catch {}
@@ -322,7 +392,6 @@ export default function Navigator() {
     }
   });
 
-  const entry = cache.get(currentPath);
   const elapsedSec = ((Date.now() - elapsedStart) / 1000).toFixed(1);
 
   const folderRowsAll = ((): Array<{label: string; right?: string; dim?: boolean}> => {
@@ -382,7 +451,7 @@ export default function Navigator() {
         <Text> {currentSizeKb == null ? '—' : humanFromKB(currentSizeKb)}</Text>
       </Box>
       <Box>
-        <Text dimColor>Up/Down: select • Right: enter • Left: up • Enter: scan • r: rescan • q: quit</Text>
+        <Text dimColor>Up/Down: select • Right: enter • Left: up • Enter: scan • r: rescan • d: delete • q: quit</Text>
       </Box>
 
       {entry?.status === 'unscanned' && (
@@ -395,9 +464,7 @@ export default function Navigator() {
         <Box flexDirection="column">
           {(() => {
             const dirDone = !!(progressDirs && progressDirs.total > 0 && progressDirs.processed >= progressDirs.total);
-            const filesHas = !!progressFiles;
-            const filesDone = !!(progressFiles && progressFiles.total > 0 && progressFiles.processed >= progressFiles.total);
-            const color = dirDone && (filesDone || !filesHas) ? 'green' : (progressDirs || progressFiles ? 'yellow' : 'gray');
+            const color = dirDone ? 'green' : (progressDirs ? 'yellow' : 'gray');
             return (
               <Text color={color}>{spinnerFrames[spinIdx]} Scanning… | elapsed {elapsedSec}s</Text>
             );
@@ -432,28 +499,43 @@ export default function Navigator() {
 
       {entry && (
         <>
-          <SectionTitle>Folders (top {TOP_N})</SectionTitle>
-          {totalFolderRows > 0 && (
-            <Text dimColor>
-              Showing {safeOffset + 1}-{Math.min(safeOffset + folderViewSize, totalFolderRows)} of {totalFolderRows}
-            </Text>
-          )}
-          {folderRows.length === 0 ? <Text dimColor>(none)</Text> : <Rows items={folderRows} selectedIndex={Math.min(selectedIndex - safeOffset, folderRows.length - 1)} />}
-        </>
-      )}
-
-      {entry?.status === 'scanning' && folderRows.length > 0 && (
-        <>
           <SectionTitle>
-            Folders (top {TOP_N}) <Text dimColor italic>(cached — updating…)</Text>
+            Folders (top {TOP_N})
+            {entry.status === 'scanning' && folderRows.length > 0 && (
+              <Text dimColor italic> (cached — updating…)</Text>
+            )}
           </SectionTitle>
           {totalFolderRows > 0 && (
             <Text dimColor>
               Showing {safeOffset + 1}-{Math.min(safeOffset + folderViewSize, totalFolderRows)} of {totalFolderRows}
             </Text>
           )}
-          {folderRows.length === 0 ? <Text dimColor>(none)</Text> : <Rows items={folderRows} selectedIndex={Math.min(selectedIndex - safeOffset, folderRows.length - 1)} />}
+          {folderRows.length === 0 ? (
+            <Text dimColor>(none)</Text>
+          ) : (
+            <Rows
+              items={folderRows}
+              selectedIndex={Math.min(selectedIndex - safeOffset, folderRows.length - 1)}
+            />
+          )}
         </>
+      )}
+
+      {deletePrompt && (
+        <Box marginTop={1} flexDirection="column">
+          <Text color="red" bold>
+            {deletePrompt.status === 'working' ? 'Deleting…' : 'Delete selected folder?'}
+          </Text>
+          <Text>
+            <Text color="yellow">{deletePrompt.path}</Text>
+          </Text>
+          {deletePrompt.error && (
+            <Text color="red">Error: {deletePrompt.error}</Text>
+          )}
+          <Text dimColor>
+            {deletePrompt.status === 'working' ? 'Please wait…' : 'Press y to confirm, n to cancel'}
+          </Text>
+        </Box>
       )}
     </Box>
   );
